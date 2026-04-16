@@ -1,8 +1,8 @@
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/planning_scene/planning_scene.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
-#include <moveit/task_constructor/solvers/cartesian_path.h>
-#include <moveit/task_constructor/solvers/pipeline_planner.h>
+#include <moveit/task_constructor/container.h>
+#include <moveit/task_constructor/solvers.h>
 #include <moveit/task_constructor/stages.h>
 #include <moveit/task_constructor/task.h>
 #include <rclcpp/rclcpp.hpp>
@@ -54,13 +54,6 @@ int main(int argc, char *argv[]) {
   t.setProperty("hand", "hand");
   t.setProperty("ik_frame", "panda_link8");
 
-  auto scene =
-      std::make_shared<planning_scene::PlanningScene>(t.getRobotModel());
-  auto &robot_state = scene->getCurrentStateNonConst();
-  robot_state.setToDefaultValues();
-  robot_state.setToDefaultValues(robot_state.getJointModelGroup("panda_arm"),
-                                 "ready");
-
   auto pipeline_planner = std::make_shared<solvers::PipelinePlanner>(node);
   auto cartesian_planner = std::make_shared<solvers::CartesianPath>();
 
@@ -71,7 +64,8 @@ int main(int argc, char *argv[]) {
   }
 
   {
-    auto stage = std::make_unique<stages::MoveTo>("MoveTo", pipeline_planner);
+    auto stage =
+        std::make_unique<stages::MoveTo>("Gripper Open", pipeline_planner);
     stage->setGroup("hand");
     stage->setGoal("open");
     Initial_pointer = stage.get();
@@ -84,39 +78,83 @@ int main(int argc, char *argv[]) {
         stages::Connect::GroupPlannerVector{{"panda_arm", pipeline_planner}});
     t.add(std::move(connect));
   }
-
   {
-    auto stage = std::make_unique<stages::GenerateGraspPose>("Grasp Pose");
-    stage->setObject("cylinder");
-    stage->setAngleDelta(M_PI / 4);
-    stage->setMonitoredStage(Initial_pointer);
-    stage->setEndEffector("hand");
-    stage->setPreGraspPose("open");
+    auto pick_container = std::make_unique<SerialContainer>("Pick");
+    {
+      auto stage = std::make_unique<stages::MoveRelative>("Approach Object",
+                                                          cartesian_planner);
+      stage->setGroup("panda_arm");
+      geometry_msgs::msg::Vector3Stamped direction;
+      direction.header.frame_id = "panda_link8";
+      direction.vector.z = 0.1;
+      stage->setDirection(direction);
+      pick_container->insert(std::move(stage));
+    }
 
-    auto ik_wrapper =
-        std::make_unique<stages::ComputeIK>("compute_ik", std::move(stage));
-    ik_wrapper->setGroup("panda_arm");
-    ik_wrapper->setMaxIKSolutions(8);
-    ik_wrapper->setEndEffector("hand");
-    ik_wrapper->setIKFrame(
-        Eigen::Isometry3d(Eigen::Translation3d(0, 0, 0.1) *
-                          Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitX()) *
-                          Eigen::AngleAxisd(0.785, Eigen::Vector3d::UnitY()) *
-                          Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitZ())),
-        "panda_link8");
-    ik_wrapper->properties().configureInitFrom(Stage::INTERFACE,
-                                               {"target_pose"});
-    t.add(std::move(ik_wrapper));
+    {
+      auto stage = std::make_unique<stages::GenerateGraspPose>("Grasp Pose");
+      stage->setObject("cylinder");
+      stage->setAngleDelta(M_PI / 12);
+      stage->setMonitoredStage(Initial_pointer);
+      stage->setEndEffector("hand");
+      stage->setPreGraspPose("open");
+
+      auto ik_wrapper =
+          std::make_unique<stages::ComputeIK>("Compute IK", std::move(stage));
+      ik_wrapper->setGroup("panda_arm");
+      ik_wrapper->setMaxIKSolutions(8);
+      ik_wrapper->setEndEffector("hand");
+      ik_wrapper->setIKFrame(
+          Eigen::Isometry3d(Eigen::Translation3d(0, 0, 0.1) *
+                            Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitX()) *
+                            Eigen::AngleAxisd(0.785, Eigen::Vector3d::UnitY()) *
+                            Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitZ())),
+          "panda_link8");
+      ik_wrapper->properties().configureInitFrom(Stage::INTERFACE,
+                                                 {"target_pose"});
+      pick_container->insert(std::move(ik_wrapper));
+    }
+    {
+      auto stage = std::make_unique<stages::ModifyPlanningScene>(
+          "allow collison (hand,object)");
+      stage->allowCollisions("cylinder",
+                             t.getRobotModel()
+                                 ->getJointModelGroup("hand")
+                                 ->getLinkModelNamesWithCollisionGeometry(),
+                             true);
+      pick_container->insert(std::move(stage));
+    }
+
+    {
+      auto stage =
+          std::make_unique<stages::MoveTo>("Close Gripper", pipeline_planner);
+      stage->setGroup("hand");
+      stage->setGoal("close");
+      pick_container->insert(std::move(stage));
+    }
+    {
+      auto stage =
+          std::make_unique<stages::ModifyPlanningScene>("Attach Object");
+      stage->attachObject("cylinder", "panda_link8");
+      pick_container->insert(std::move(stage));
+    }
+    {
+      auto stage =
+          std::make_unique<stages::MoveRelative>("Lift", cartesian_planner);
+      stage->setGroup("panda_arm");
+      geometry_msgs::msg::Vector3Stamped direction;
+      direction.header.frame_id = "world";
+      direction.vector.z = 0.3;
+      stage->setDirection(direction);
+      pick_container->insert(std::move(stage));
+    }
+    t.add(std::move(pick_container));
   }
 
   try {
     t.init();
-    if (t.plan() && !t.solutions().empty()) {
-      t.introspection().publishSolution(*t.solutions().front());
-    } else {
-      RCLCPP_ERROR(node->get_logger(),
-                   "The planning Failed or no solutions are found");
-    }
+    t.plan(10);
+    t.introspection().publishSolution(*t.solutions().front());
   } catch (InitStageException &e) {
     std::cerr << "Error" << e << std::endl;
   }
