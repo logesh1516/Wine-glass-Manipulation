@@ -5,6 +5,7 @@
 #include <moveit/task_constructor/stages.h>
 #include <moveit/task_constructor/task.h>
 #include <rclcpp/rclcpp.hpp>
+#include <utility>
 
 using namespace moveit::task_constructor;
 
@@ -198,8 +199,51 @@ int main(int argc, char *argv[]) {
       ik_wrapper->properties().configureInitFrom(Stage::INTERFACE,
                                                  {"target_pose"});
       place_container->insert(std::move(ik_wrapper));
+      {
+        auto stage =
+            std::make_unique<stages::MoveTo>("Open Gripper", pipeline_planner);
+        stage->setGroup("hand");
+        stage->setGoal("open");
+        place_container->insert(std::move(stage));
+      }
     }
+    {
+      auto stage =
+          std::make_unique<stages::ModifyPlanningScene>("forbid collison");
+      stage->allowCollisions(
+          "cylinder", *t.getRobotModel()->getJointModelGroup("hand"), false);
+      place_container->insert(std::move(stage));
+    }
+
+    {
+      auto stage =
+          std::make_unique<stages::ModifyPlanningScene>("detach object");
+      stage->detachObject("cylinder", "panda_link8");
+      place_container->insert(std::move(stage));
+    }
+
+    {
+      auto stage = std::make_unique<stages::MoveRelative>("retreat after place",
+                                                          cartesian_planner);
+      stage->setGroup("panda_arm");
+      stage->setMinMaxDistance(.12, .25);
+      stage->setIKFrame("panda_link8");
+      geometry_msgs::msg::Vector3Stamped vec;
+      vec.header.frame_id = "panda_link8";
+      vec.vector.z = -1.0;
+      stage->setDirection(vec);
+      place_container->insert(std::move(stage));
+    }
+
     t.add(std::move(place_container));
+  }
+  {
+    auto stage =
+        std::make_unique<stages::MoveTo>("move home", pipeline_planner);
+    stage->setGroup("panda_arm");
+    stage->setGoal("ready");
+    stage->restrictDirection(stages::MoveTo::FORWARD);
+    t.add(std::move(stage));
   }
 
   try {
