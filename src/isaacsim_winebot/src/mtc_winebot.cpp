@@ -1,3 +1,5 @@
+#include <cmath>
+#include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit/task_constructor/container.h>
@@ -124,17 +126,17 @@ int main(int argc, char *argv[]) {
       stage->setMonitoredStage(Initial_pointer);
       stage->properties().configureInitFrom(Stage::PARENT);
       stage->setPreGraspPose("open");
-
       auto ik_wrapper =
           std::make_unique<stages::ComputeIK>("Compute IK", std::move(stage));
       ik_wrapper->properties().configureInitFrom(Stage::PARENT,
                                                  {"group", "eef"});
       ik_wrapper->setMaxIKSolutions(8);
       ik_wrapper->setIKFrame(
-          Eigen::Isometry3d(Eigen::Translation3d(0, 0, 0.1) *
-                            Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitX()) *
-                            Eigen::AngleAxisd(0.785, Eigen::Vector3d::UnitY()) *
-                            Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitZ())),
+          Eigen::Isometry3d(
+              Eigen::Translation3d(-0.06, 0.06, 0.1) *
+              Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
+              Eigen::AngleAxisd(M_PI / 4, Eigen::Vector3d::UnitY()) *
+              Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitZ())),
           "panda_link8");
       ik_wrapper->properties().configureInitFrom(Stage::INTERFACE,
                                                  {"target_pose"});
@@ -232,9 +234,10 @@ int main(int argc, char *argv[]) {
           std::make_unique<stages::ComputeIK>("ComputeIK", std::move(stage));
       ik_wrapper->setMaxIKSolutions(2);
       ik_wrapper->setIKFrame(
-          Eigen::Isometry3d(Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitX()) *
-                            Eigen::AngleAxisd(0.785, Eigen::Vector3d::UnitY()) *
-                            Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitZ())),
+          Eigen::Isometry3d(
+              Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
+              Eigen::AngleAxisd(M_PI / 4, Eigen::Vector3d::UnitY()) *
+              Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ())),
           "panda_link8");
       ik_wrapper->properties().configureInitFrom(Stage::PARENT,
                                                  {"group", "eef"});
@@ -296,7 +299,7 @@ int main(int argc, char *argv[]) {
     t.add(std::move(stage));
   }
 
-  // ----------(PLAN)----------------------
+  // ----------(PLAN & EXECUTE)----------------------
   try {
     t.init();
     t.plan(10);
