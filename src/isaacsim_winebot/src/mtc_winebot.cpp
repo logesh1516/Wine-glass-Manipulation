@@ -10,7 +10,7 @@
 using namespace moveit::task_constructor;
 
 int main(int argc, char *argv[]) {
-  // ----------(ROS2 NODE)----------------------
+  // ----------(ROS2 NODE & EXECUTOR)----------------------
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>(
       "MTC_node",
@@ -48,21 +48,25 @@ int main(int argc, char *argv[]) {
   Task t;
   t.setName("mtc_demo");
   t.loadRobotModel(node);
+
   // ----------(TASK PROPERTIES)----------------------
   t.setProperty("group", "panda_arm");
   t.setProperty("eef", "hand");
   t.setProperty("hand", "hand");
   t.setProperty("ik_frame", "panda_link8");
 
+  // ----------(PLANNERS)----------------------
   auto pipeline_planner = std::make_shared<solvers::PipelinePlanner>(node);
   auto cartesian_planner = std::make_shared<solvers::CartesianPath>();
 
+  // ----------(CURRENT STATE)----------------------
   Stage *Initial_pointer = nullptr;
   {
-    auto stage = std::make_unique<stages::CurrentState>("Initial");
+    auto stage = std::make_unique<stages::CurrentState>("Initial Position");
     t.add(std::move(stage));
   }
 
+  // ----------(GRIPPER OPEN)----------------------
   {
     auto stage =
         std::make_unique<stages::MoveTo>("Gripper Open", pipeline_planner);
@@ -72,15 +76,20 @@ int main(int argc, char *argv[]) {
     t.add(std::move(stage));
   }
 
+  // ----------(CONNECT - Initial state to Pick container)----------------------
   {
     auto connect = std::make_unique<stages::Connect>(
         "connect",
         stages::Connect::GroupPlannerVector{{"panda_arm", pipeline_planner}});
     t.add(std::move(connect));
   }
+
+  // ----------(PICK CONTAINER)----------------------
   Stage *pick_stage_ptr = nullptr;
   {
     auto pick_container = std::make_unique<SerialContainer>("Pick");
+
+    // ----------(APPROACH OBJECT)----------------------
     {
       auto stage = std::make_unique<stages::MoveRelative>("Approach Object",
                                                           cartesian_planner);
@@ -92,6 +101,7 @@ int main(int argc, char *argv[]) {
       pick_container->insert(std::move(stage));
     }
 
+    // ---(GENERATEGRASPPOSE WITH COMPUTEIK WRAPPER)------------
     {
       auto stage = std::make_unique<stages::GenerateGraspPose>("Grasp Pose");
       stage->setObject("cylinder");
@@ -115,6 +125,8 @@ int main(int argc, char *argv[]) {
                                                  {"target_pose"});
       pick_container->insert(std::move(ik_wrapper));
     }
+
+    // ----------(ENABLE COLLISON)----------------------
     {
       auto stage = std::make_unique<stages::ModifyPlanningScene>(
           "allow collison (hand,object)");
@@ -126,6 +138,7 @@ int main(int argc, char *argv[]) {
       pick_container->insert(std::move(stage));
     }
 
+    // ----------(CLOSE GRIPPER)----------------------
     {
       auto stage =
           std::make_unique<stages::MoveTo>("Close Gripper", pipeline_planner);
@@ -133,12 +146,16 @@ int main(int argc, char *argv[]) {
       stage->setGoal("close");
       pick_container->insert(std::move(stage));
     }
+
+    // ----------(ATTACH OBJECT)----------------------
     {
       auto stage =
           std::make_unique<stages::ModifyPlanningScene>("Attach Object");
       stage->attachObject("cylinder", "panda_link8");
       pick_container->insert(std::move(stage));
     }
+
+    // ----------(LIFT)----------------------
     {
       auto stage =
           std::make_unique<stages::MoveRelative>("Lift", cartesian_planner);
@@ -151,10 +168,13 @@ int main(int argc, char *argv[]) {
     }
     pick_stage_ptr = pick_container.get();
     t.add(std::move(pick_container));
-  }
+  } // end of pick_container
 
+  // ----------(PLACE CONTAINER)----------------------
   {
     auto place_container = std::make_unique<SerialContainer>("Place Container");
+
+    // ----------(CONNECT PLACE)----------------------
     {
       auto connect = std::make_unique<stages::Connect>(
           "connect",
@@ -162,6 +182,7 @@ int main(int argc, char *argv[]) {
       place_container->insert(std::move(connect));
     }
 
+    // ----------(LOWER OBJECT)----------------------
     {
       auto stage = std::make_unique<stages::MoveRelative>("lower object",
                                                           cartesian_planner);
@@ -172,6 +193,8 @@ int main(int argc, char *argv[]) {
       stage->setGroup("panda_arm");
       place_container->insert(std::move(stage));
     }
+
+    // ------(GENERATEPLACEPOSE WITH COMPUTEIK WRAPPER)-------------
     {
       auto stage =
           std::make_unique<stages::GeneratePlacePose>("generate_place_pose");
@@ -199,6 +222,8 @@ int main(int argc, char *argv[]) {
       ik_wrapper->properties().configureInitFrom(Stage::INTERFACE,
                                                  {"target_pose"});
       place_container->insert(std::move(ik_wrapper));
+
+      // ----------(OPEN GRIPPER)----------------------
       {
         auto stage =
             std::make_unique<stages::MoveTo>("Open Gripper", pipeline_planner);
@@ -207,6 +232,8 @@ int main(int argc, char *argv[]) {
         place_container->insert(std::move(stage));
       }
     }
+
+    // ----------(FORBID COLLISON)----------------------
     {
       auto stage =
           std::make_unique<stages::ModifyPlanningScene>("forbid collison");
@@ -215,6 +242,7 @@ int main(int argc, char *argv[]) {
       place_container->insert(std::move(stage));
     }
 
+    // ----------(DETACH OBJECT)----------------------
     {
       auto stage =
           std::make_unique<stages::ModifyPlanningScene>("detach object");
@@ -222,6 +250,7 @@ int main(int argc, char *argv[]) {
       place_container->insert(std::move(stage));
     }
 
+    // ----------(RETREAT BACK)----------------------
     {
       auto stage = std::make_unique<stages::MoveRelative>("retreat after place",
                                                           cartesian_planner);
@@ -230,13 +259,15 @@ int main(int argc, char *argv[]) {
       stage->setIKFrame("panda_link8");
       geometry_msgs::msg::Vector3Stamped vec;
       vec.header.frame_id = "panda_link8";
-      vec.vector.z = -1.0;
+      vec.vector.z = -0.5;
       stage->setDirection(vec);
       place_container->insert(std::move(stage));
     }
 
     t.add(std::move(place_container));
-  }
+  } // end of place container
+
+  // ----------(MOVE HOME)----------------------
   {
     auto stage =
         std::make_unique<stages::MoveTo>("move home", pipeline_planner);
@@ -246,6 +277,7 @@ int main(int argc, char *argv[]) {
     t.add(std::move(stage));
   }
 
+  // ----------(PLAN)----------------------
   try {
     t.init();
     t.plan(10);
