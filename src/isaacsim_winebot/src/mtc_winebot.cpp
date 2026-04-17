@@ -158,7 +158,8 @@ int main(int argc, char *argv[]) {
       auto stage =
           std::make_unique<stages::MoveTo>("Close Gripper", pipeline_planner);
       stage->setGroup("hand");
-      stage->setGoal("close");
+      stage->setGoal(
+          {{"panda_finger_joint1", 0.013}, {"panda_finger_joint2", 0.013}});
       pick_container->insert(std::move(stage));
     }
 
