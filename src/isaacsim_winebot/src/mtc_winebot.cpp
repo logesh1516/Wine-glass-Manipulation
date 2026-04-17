@@ -1,12 +1,13 @@
+#include <Eigen/Eigen>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit/task_constructor/container.h>
 #include <moveit/task_constructor/solvers.h>
-#include <moveit/task_constructor/stage.h>
 #include <moveit/task_constructor/stages.h>
 #include <moveit/task_constructor/task.h>
 #include <rclcpp/rclcpp.hpp>
-#include <utility>
+#include <tf2/LinearMath/Quaternion.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 using namespace moveit::task_constructor;
 
@@ -47,7 +48,7 @@ int main(int argc, char *argv[]) {
 
   // ----------(TASK)----------------------
   Task t;
-  t.setName("mtc_demo");
+  t.setName("wine_glass_manipulation");
   t.loadRobotModel(node);
 
   // ----------(TASK PROPERTIES)----------------------
@@ -58,8 +59,8 @@ int main(int argc, char *argv[]) {
 
   // ----------(PLANNERS)----------------------
   auto pipeline_planner = std::make_shared<solvers::PipelinePlanner>(node);
-  pipeline_planner->setMaxAccelerationScalingFactor(0.3);
-  pipeline_planner->setMaxVelocityScalingFactor(0.3);
+  pipeline_planner->setMaxAccelerationScalingFactor(0.2);
+  pipeline_planner->setMaxVelocityScalingFactor(0.2);
 
   auto cartesian_planner = std::make_shared<solvers::CartesianPath>();
   cartesian_planner->setMaxAccelerationScalingFactor(0.2);
@@ -90,7 +91,7 @@ int main(int argc, char *argv[]) {
     auto stage = std::make_unique<stages::Connect>(
         "move to pick",
         stages::Connect::GroupPlannerVector{{"panda_arm", pipeline_planner}});
-    stage->setTimeout(5.0);
+    stage->setTimeout(2.0);
     t.add(std::move(stage));
   }
 
@@ -110,8 +111,10 @@ int main(int argc, char *argv[]) {
       stage->properties().configureInitFrom(Stage::PARENT, {"group"});
       stage->setMinMaxDistance(0.05, 0.1);
       geometry_msgs::msg::Vector3Stamped direction;
-      direction.header.frame_id = "panda_link8";
+      direction.header.frame_id =
+          "panda_link8"; // approach obeject does not influence the Grasp pose
       direction.vector.z = 0.1;
+      stage->setMinMaxDistance(0.1, 0.15);
       stage->setDirection(direction);
       pick_container->insert(std::move(stage));
     }
@@ -122,20 +125,27 @@ int main(int argc, char *argv[]) {
       stage->setObject("cylinder");
       stage->setAngleDelta(M_PI / 12);
       stage->setMonitoredStage(Initial_pointer);
+      stage->setRotationAxis(
+          Eigen::Vector3d::UnitZ()); // default is z , but here explicitly
+                                     // definied for readablity.
       stage->properties().configureInitFrom(Stage::PARENT);
       stage->setPreGraspPose("open");
+
+      // TODO(DONE): use the quternion to clen the setIKFrame
+      Eigen::Isometry3d ik_transformation;
+      Eigen::Quaterniond q =
+          Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
+          Eigen::AngleAxisd(M_PI / 4, Eigen::Vector3d::UnitY()) *
+          Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitZ());
+      ik_transformation.linear() = q.matrix();
+      ik_transformation.translation().z() = 0.1;
 
       auto ik_wrapper =
           std::make_unique<stages::ComputeIK>("Compute IK", std::move(stage));
       ik_wrapper->properties().configureInitFrom(Stage::PARENT,
                                                  {"group", "eef"});
       ik_wrapper->setMaxIKSolutions(8);
-      ik_wrapper->setIKFrame(
-          Eigen::Isometry3d(Eigen::Translation3d(0, 0, 0.1) *
-                            Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitX()) *
-                            Eigen::AngleAxisd(0.785, Eigen::Vector3d::UnitY()) *
-                            Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitZ())),
-          "panda_link8");
+      ik_wrapper->setIKFrame(ik_transformation, "panda_link8");
       ik_wrapper->properties().configureInitFrom(Stage::INTERFACE,
                                                  {"target_pose"});
       pick_container->insert(std::move(ik_wrapper));
@@ -144,7 +154,7 @@ int main(int argc, char *argv[]) {
     // ----------(ENABLE COLLISON)----------------------
     {
       auto stage = std::make_unique<stages::ModifyPlanningScene>(
-          "allow collison (hand,object)");
+          "Allow Collison (Hand, Object)");
       stage->allowCollisions("cylinder",
                              t.getRobotModel()
                                  ->getJointModelGroup("hand")
@@ -158,8 +168,10 @@ int main(int argc, char *argv[]) {
       auto stage =
           std::make_unique<stages::MoveTo>("Close Gripper", pipeline_planner);
       stage->setGroup("hand");
-      stage->setGoal(
-          {{"panda_finger_joint1", 0.013}, {"panda_finger_joint2", 0.013}});
+      stage->setGoal({{"panda_finger_joint1", 0.013},
+                      {"panda_finger_joint2",
+                       0.013}}); // used separate joint control , to overcome
+                                 // the failure of full state completion.
       pick_container->insert(std::move(stage));
     }
 
@@ -186,11 +198,28 @@ int main(int argc, char *argv[]) {
     t.add(std::move(pick_container));
   } // end of pick_container
 
-  // ----------(MOVE TO PLACE)----------------------
+  moveit_msgs::msg::OrientationConstraint ocm;
+  ocm.link_name = "panda_link8";
+  ocm.header.frame_id = "world";
+
+  tf2::Quaternion q;
+  q.setRPY(M_PI / 2, M_PI / 4, 0.0);
+
+  ocm.orientation = tf2::toMsg(q);
+  ocm.absolute_x_axis_tolerance = M_PI;
+  ocm.absolute_y_axis_tolerance = M_PI;
+  ocm.absolute_z_axis_tolerance = M_PI;
+
+  ocm.weight = 1.0;
+  moveit_msgs::msg::Constraints constraints;
+  constraints.orientation_constraints.push_back(ocm);
+  // ----------(CONNECT - MOVE TO PLACE)----------------------
   {
     auto stage = std::make_unique<stages::Connect>(
-        "connect",
+        "Move to Place - Pipeline",
         stages::Connect::GroupPlannerVector{{"panda_arm", pipeline_planner}});
+    stage->setTimeout(5.0);
+    stage->setPathConstraints(constraints);
     t.add(std::move(stage));
   }
 
@@ -204,7 +233,7 @@ int main(int argc, char *argv[]) {
 
     // ----------(LOWER OBJECT)----------------------
     {
-      auto stage = std::make_unique<stages::MoveRelative>("lower object",
+      auto stage = std::make_unique<stages::MoveRelative>("Lower Object",
                                                           cartesian_planner);
       geometry_msgs::msg::Vector3Stamped vec;
       vec.header.frame_id = "world";
@@ -216,26 +245,30 @@ int main(int argc, char *argv[]) {
 
     // ------(GENERATEPLACEPOSE WITH COMPUTEIK WRAPPER)-------------
     {
-      auto stage =
-          std::make_unique<stages::GeneratePlacePose>("Generate place pose");
+      auto stage = std::make_unique<stages::GeneratePlacePose>("Place Pose");
       stage->setMonitoredStage(pick_stage_ptr);
       stage->properties().configureInitFrom(Stage::PARENT, {"ik_frame"});
       stage->setObject("cylinder");
+
       geometry_msgs::msg::PoseStamped pose;
       pose.header.frame_id = "world";
       pose.pose.position.x = 0.45;
       pose.pose.position.y = 0.4;
       pose.pose.position.z = 0.1;
       stage->setPose(pose);
+      // TODO(DONE) : replace the ik with Eigen
+      Eigen::Isometry3d place_transformation;
+
+      Eigen::Quaterniond q =
+          Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitX()) *
+          Eigen::AngleAxisd(M_PI / 4, Eigen::Vector3d::UnitY()) *
+          Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY());
+      place_transformation.linear() = q.matrix();
 
       auto ik_wrapper =
           std::make_unique<stages::ComputeIK>("ComputeIK", std::move(stage));
       ik_wrapper->setMaxIKSolutions(2);
-      ik_wrapper->setIKFrame(
-          Eigen::Isometry3d(Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitX()) *
-                            Eigen::AngleAxisd(0.785, Eigen::Vector3d::UnitY()) *
-                            Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitZ())),
-          "panda_link8");
+      ik_wrapper->setIKFrame(place_transformation, "panda_link8");
       ik_wrapper->properties().configureInitFrom(Stage::PARENT,
                                                  {"group", "eef"});
       ik_wrapper->properties().configureInitFrom(Stage::INTERFACE,
@@ -274,7 +307,7 @@ int main(int argc, char *argv[]) {
       auto stage = std::make_unique<stages::MoveRelative>("retreat after place",
                                                           cartesian_planner);
       stage->setGroup("panda_arm");
-      stage->setMinMaxDistance(.12, .25);
+      stage->setMinMaxDistance(0.12, 0.25);
       stage->properties().configureInitFrom(Stage::PARENT, {"group"});
       geometry_msgs::msg::Vector3Stamped vec;
       vec.header.frame_id = "panda_link8";
@@ -296,7 +329,7 @@ int main(int argc, char *argv[]) {
     t.add(std::move(stage));
   }
 
-  // ----------(PLAN)----------------------
+  // ----------(PLAN & EXECUTE)----------------------
   try {
     t.init();
     t.plan(10);
