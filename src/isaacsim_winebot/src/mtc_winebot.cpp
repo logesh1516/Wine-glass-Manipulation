@@ -1,5 +1,4 @@
 #include <moveit/move_group_interface/move_group_interface.h>
-#include <moveit/planning_scene/planning_scene.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit/task_constructor/container.h>
 #include <moveit/task_constructor/solvers.h>
@@ -78,6 +77,7 @@ int main(int argc, char *argv[]) {
         stages::Connect::GroupPlannerVector{{"panda_arm", pipeline_planner}});
     t.add(std::move(connect));
   }
+  Stage *pick_stage_ptr = nullptr;
   {
     auto pick_container = std::make_unique<SerialContainer>("Pick");
     {
@@ -148,19 +148,69 @@ int main(int argc, char *argv[]) {
       stage->setDirection(direction);
       pick_container->insert(std::move(stage));
     }
+    pick_stage_ptr = pick_container.get();
     t.add(std::move(pick_container));
+  }
+
+  {
+    auto place_container = std::make_unique<SerialContainer>("Place Container");
+    {
+      auto connect = std::make_unique<stages::Connect>(
+          "connect",
+          stages::Connect::GroupPlannerVector{{"panda_arm", pipeline_planner}});
+      place_container->insert(std::move(connect));
+    }
+
+    {
+      auto stage = std::make_unique<stages::MoveRelative>("lower object",
+                                                          cartesian_planner);
+      geometry_msgs::msg::Vector3Stamped vec;
+      vec.header.frame_id = "world";
+      vec.vector.z = -0.3;
+      stage->setDirection(vec);
+      stage->setGroup("panda_arm");
+      place_container->insert(std::move(stage));
+    }
+    {
+      auto stage =
+          std::make_unique<stages::GeneratePlacePose>("generate_place_pose");
+      stage->setMonitoredStage(pick_stage_ptr);
+      stage->properties().configureInitFrom(Stage::PARENT, {"ik_frame"});
+      stage->setObject("cylinder");
+      stage->properties().set("marker_ns", "place_pose");
+      geometry_msgs::msg::PoseStamped pose;
+      pose.header.frame_id = "world";
+      pose.pose.position.x = 0.45;
+      pose.pose.position.y = 0.4;
+      pose.pose.position.z = 0.1;
+      stage->setPose(pose);
+
+      auto ik_wrapper =
+          std::make_unique<stages::ComputeIK>("ComputeIK", std::move(stage));
+      ik_wrapper->setMaxIKSolutions(2);
+      ik_wrapper->setIKFrame(
+          Eigen::Isometry3d(Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitX()) *
+                            Eigen::AngleAxisd(0.785, Eigen::Vector3d::UnitY()) *
+                            Eigen::AngleAxisd(1.571, Eigen::Vector3d::UnitZ())),
+          "panda_link8");
+      ik_wrapper->setGroup("panda_arm");
+      ik_wrapper->setEndEffector("hand");
+      ik_wrapper->properties().configureInitFrom(Stage::INTERFACE,
+                                                 {"target_pose"});
+      place_container->insert(std::move(ik_wrapper));
+    }
+    t.add(std::move(place_container));
   }
 
   try {
     t.init();
     t.plan(10);
     t.introspection().publishSolution(*t.solutions().front());
-  } catch (InitStageException &e) {
-    std::cerr << "Error" << e << std::endl;
+  } catch (const InitStageException &e) {
+    std::cerr << "Initialization error: " << e << std::endl;
   }
 
   spinner.join();
-  rclcpp::shutdown();
 
   return 0;
 }
