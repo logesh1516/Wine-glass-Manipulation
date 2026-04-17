@@ -1,7 +1,8 @@
 from launch_ros.actions import Node
 from moveit_configs_utils.moveit_configs_builder import MoveItConfigsBuilder
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess
+from launch.actions import ExecuteProcess, DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 from os.path import join
 
@@ -13,10 +14,28 @@ def generate_launch_description():
     ros2_control_file = join(get_package_share_directory(
         "moveit_resources_panda_moveit_config"), "config", "ros2_controllers.yaml")
 
+    ros2_control_hardware_type = DeclareLaunchArgument(
+        "ros2_control_hardware_type",
+        default_value="isaac",
+        description="ROS2 control hardware interface type to use for the launch file -- possible values: [mock_components, isaac]",
+    )
+
+    use_sim_time = DeclareLaunchArgument(
+        "use_sim_time",
+        default_value="true",
+        description="Use simulation clock if true",
+    )
     moveit_builder_config = (
         MoveItConfigsBuilder
         ("moveit_resources_panda")
-        .robot_description(file_path="config/panda.urdf.xacro")
+        .robot_description(
+            file_path="config/panda.urdf.xacro",
+            mappings={
+                "ros2_control_hardware_type": LaunchConfiguration(
+                    "ros2_control_hardware_type"
+                )
+            },
+        )
         .planning_pipelines(pipelines=["ompl"])
         .trajectory_execution(
             file_path="config/gripper_moveit_controllers.yaml")
@@ -33,7 +52,8 @@ def generate_launch_description():
         output="screen",
         parameters=[
                 moveit_builder_config.to_dict(),
-                mtc_capabilites
+                mtc_capabilites,
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
         ]
     )
 
@@ -46,7 +66,9 @@ def generate_launch_description():
             moveit_builder_config.robot_description,
             moveit_builder_config.planning_pipelines,
             moveit_builder_config.robot_description_semantic,
-            moveit_builder_config.robot_description_kinematics
+            moveit_builder_config.robot_description_kinematics,
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+
         ]
     )
 
@@ -54,21 +76,31 @@ def generate_launch_description():
         package="tf2_ros",
         executable="static_transform_publisher",
         output="screen",
-        arguments=["0", "0", "0", "0", "0", "0", "world", "panda_link0"]
+        arguments=["0", "0", "0", "0", "0", "0", "world", "panda_link0"],
+        parameters=[
+
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ]
     )
 
     robot_state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
         output="screen",
-        parameters=[moveit_builder_config.robot_description]
+        parameters=[
+            moveit_builder_config.robot_description,
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ]
     )
 
     ros2_control_node = Node(
         package="controller_manager",
         executable="ros2_control_node",
         output="screen",
-        parameters=[moveit_builder_config.robot_description, ros2_control_file]
+        parameters=[
+            moveit_builder_config.robot_description, ros2_control_file,
+            {"use_sim_time": LaunchConfiguration("use_sim_time")},
+        ]
     )
 
     load_controllers = []
@@ -86,6 +118,8 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            ros2_control_hardware_type,
+            use_sim_time,
             rviz2,
             static_transform,
             move_group_node,
