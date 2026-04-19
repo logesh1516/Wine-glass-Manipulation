@@ -13,7 +13,7 @@ def generate_launch_description():
     )
     node = Node(
         package="isaacsim_winebot",
-        executable="mtc_winebot",
+        executable="mtc_winebot_glass",
         output="screen",
         parameters=[
             moveit_builder_config.to_dict()

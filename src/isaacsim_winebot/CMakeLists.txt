@@ -13,6 +13,7 @@ find_package(moveit_ros_planning_interface REQUIRED)
 find_package(moveit_visual_tools REQUIRED)
 
 add_executable(mtc_winebot src/mtc_winebot.cpp)
+add_executable(mtc_winebot_glass src/mtc_winebot_glass.cpp)
 target_include_directories(mtc_winebot PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -24,8 +25,14 @@ ament_target_dependencies(
   "moveit_ros_planning_interface"
   "moveit_visual_tools"
 )
-
-install(TARGETS mtc_winebot
+ament_target_dependencies(
+  mtc_winebot_glass
+  "rclcpp"
+  "moveit_task_constructor_core"
+  "moveit_ros_planning_interface"
+  "moveit_visual_tools"
+)
+install(TARGETS mtc_winebot mtc_winebot_glass
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch rviz meshes
