@@ -1,142 +1,132 @@
-# 🍷 WineBot — Wine Glass Stacking Robot
+# 🍷 WineBot — Autonomous Wine Glass Stacking
 
-> A robot that picks up a wine glass and carefully stacks it on another — all planned automatically.
-
----
-
-## 📽️ Demo
-
-> Add your Isaac Sim video or GIF here
+**Robotics | Motion Planning | ROS 2 | MoveIt 2 | NVIDIA Isaac Sim**
 
 ---
 
-## 🧠 What is this?
+## 📌 Overview
 
-This project shows how a robot arm can:
-- Pick up a wine glass  
-- Move it safely  
-- Place it exactly on top of another glass  
+WineBot is a robotics project that demonstrates **autonomous pick-and-place with precision stacking** using a Franka Panda robot arm.
 
-Everything is done using automatic motion planning, not hardcoded movements.
+The system plans and executes the complete task of:
+- Grasping a  wine glass  
+- Transporting it safely  
+- Stacking it accurately on another glass  
 
----
-
-## ⚙️ How it Works
-
-The robot uses two types of motion:
-
-### 🔹 Smooth Movement (General Motion)
-Used when the robot is just moving freely.
-
-### 🔹 Straight-Line Precision Movement
-Used when accuracy matters:
-- Moving toward the glass  
-- Lifting it  
-- Placing it carefully  
+All motions are generated using **MoveIt Task Constructor (MTC)**, ensuring collision-aware and constraint-driven planning.
 
 ---
 
-## 🏗️ Task Flow
+## 🎥 Demo
 
-Open Gripper  
-→ Move to Glass  
-→ Approach  
-→ Pick Glass  
-→ Lift  
-→ Move to Target  
-→ Place on Second Glass  
-→ Release  
-→ Move Back  
-→ Return Home  
+> Add a short GIF or video of the stacking task here
 
 ---
 
-## 🔑 Key Features
+## 🧠 Key Contributions
 
-### 🧩 Realistic Glass Model
-- Uses a 3D mesh (not a simple shape)
-- Makes the simulation more realistic
-
----
-
-### 🎯 Accurate Placement
-- Robot places the glass precisely on top of another
-- Maintains proper orientation (doesn’t tilt)
+- Designed a **multi-stage task pipeline** for pick-and-place using MTC  
+- Implemented **hybrid motion planning** combining joint-space and Cartesian control  
+- Integrated **mesh-based collision objects** for realistic grasping  
+- Applied **orientation constraints** to maintain object stability during transport  
+- Improved grasp success using **pose sampling and multiple IK solutions**  
 
 ---
 
-### 🔄 Smart Grasping
-- Tries multiple angles to find a valid grasp
-- Improves success rate
+## ⚙️ System Architecture
+
+The task is broken into structured stages:
+
+1. **Pre-grasp**
+   - Open gripper  
+   - Move to object  
+
+2. **Grasp**
+   - Approach object  
+   - Compute valid grasp poses  
+   - Close gripper and attach object  
+
+3. **Transport**
+   - Lift object  
+   - Move to target with orientation constraints  
+
+4. **Place**
+   - Lower object  
+   - Release and detach  
+
+5. **Post-task**
+   - Retreat  
+   - Return to home position  
 
 ---
 
-### 🤖 Stable Gripper Control
-- Directly controls finger joints
-- Avoids grasp failures
+## 🧩 Technical Highlights
+
+### Hybrid Planning Strategy
+- **Joint-space planning** for flexible movement  
+- **Cartesian planning** for precision tasks  
+
+### Realistic Simulation
+- Uses **3D mesh models (DAE)** instead of simple primitives  
+
+### Robust Grasping
+- Multiple grasp orientations evaluated  
+- Multiple inverse kinematics (IK) solutions tested  
+
+### Constraint-Aware Motion
+- Ensures the glass remains upright during transport  
 
 ---
 
-## 🌐 Scene Setup
+## 🛠️ Tech Stack
 
-Two glasses are placed in the simulation:
-- One to pick  
-- One to stack onto  
-
----
-
-## 🚀 How to Run
-
-cd ~/ros2_ws/src  
-git clone <your-repo-url>  
-
-cd ~/ros2_ws  
-colcon build --packages-select isaacsim_winebot  
-source install/setup.bash  
-
-ros2 run isaacsim_winebot mtc_winebot_glass  
+- **ROS 2 (Humble / Iron)**  
+- **MoveIt 2**  
+- **MoveIt Task Constructor (MTC)**  
+- **NVIDIA Isaac Sim**  
+- **Eigen3, tf2, geometric_shapes**  
 
 ---
 
 ## 📁 Project Structure
 
 isaacsim_winebot/  
-├── src/  
-├── meshes/  
-├── launch/  
+├── src/                # MTC task implementation  
+├── meshes/             # Wine glass model  
+├── launch/             # Simulation & MoveIt launch files  
 ├── CMakeLists.txt  
 └── package.xml  
 
 ---
 
-## 🧩 Tech Used
+## 🚀 Isaac Sim Setup 
 
-- ROS 2  
-- MoveIt 2  
-- MoveIt Task Constructor  
-- NVIDIA Isaac Sim  
+- Load the wine_glass_manipulation.usd from the isaacsim_assets into isaac sim
+- play the simulation
+
+
+## 🚀 Setup & Execution
+
+```bash
+cd ~/ros2_ws/src
+git clone git@github.com:logesh1516/Wine-glass-Manipulation.git
+
+cd ~/ros2_ws
+colcon build --packages-select isaacsim_winebot
+source install/setup.bash
+
+## for mock component(without isaac sim)
+ros2 launch isaacsim_winebot mtc_mock.launch.py
+
+## or with isaac sim
+ros2 launch isaacsim_winebot mtc_isaac.launch.py
+
+and then launch mtc 
+
+ros2 launch isaacsim_winebot mtc_execute.launch.py
+```
 
 ---
+Robotics & Automation Engineer  
 
-## 🎯 Why this Project?
-
-This is more than a basic pick-and-place.
-
-It shows:
-- Handling fragile objects  
-- Precise stacking  
-- Automatic planning  
-
----
-
-## 🔮 Future Ideas
-
-- Add camera-based detection  
-- Stack multiple glasses  
-- Run on a real robot  
-
----
-
-## 📜 License
-
-Add your license here
+Feel free to connect or collaborate on robotics and ROS-based projects.
