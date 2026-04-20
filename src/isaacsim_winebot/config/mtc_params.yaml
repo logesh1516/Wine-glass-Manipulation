@@ -1,0 +1,9 @@
+winebot:
+  glass1_pose:
+    type: double_array
+    validation:
+      fixed_size<>: [6]
+  glass2_pose:
+    type: double_array
+    validation:
+      fixed_size<>: [6]

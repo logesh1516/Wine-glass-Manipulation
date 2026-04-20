@@ -1,18 +1,14 @@
 #include <Eigen/Eigen>
-#include <boost/variant/get.hpp>
 #include <geometric_shapes/mesh_operations.h>
 #include <geometric_shapes/shape_messages.h>
 #include <geometric_shapes/shape_operations.h>
 #include <geometric_shapes/shapes.h>
-#include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit/task_constructor/container.h>
 #include <moveit/task_constructor/solvers.h>
 #include <moveit/task_constructor/stages.h>
 #include <moveit/task_constructor/task.h>
-#include <moveit_msgs/msg/detail/collision_object__struct.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <shape_msgs/msg/detail/mesh__struct.hpp>
 #include <shape_msgs/msg/mesh.h>
 #include <tf2/LinearMath/Quaternion.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -32,31 +28,39 @@ int main(int argc, char *argv[]) {
   auto spinner = std::thread([&executor] { executor.spin(); });
 
   // ----------(COLLISION OBJECT - WINE GLASS)----------------------
-  moveit_msgs::msg::CollisionObject wine_glass;
-  wine_glass.header.frame_id = "world";
-  wine_glass.id = "wine_glass";
+  auto spawn = [](const std::string &id, double x, double y, double z) {
+    moveit_msgs::msg::CollisionObject wine_glass;
+    wine_glass.header.frame_id = "world";
+    wine_glass.id = id;
 
-  shapes::Mesh *mesh = shapes::createMeshFromResource(
-      "package://isaacsim_winebot/meshes/glass.dae");
+    shapes::Mesh *mesh = shapes::createMeshFromResource(
+        "package://isaacsim_winebot/meshes/glass.dae");
 
-  shape_msgs::msg::Mesh mesh_msgs;
-  shapes::ShapeMsg mesh_msg_tmp;
-  shapes::constructMsgFromShape(mesh, mesh_msg_tmp);
-  mesh_msgs = boost::get<shape_msgs::msg::Mesh>(mesh_msg_tmp);
+    shape_msgs::msg::Mesh mesh_msgs;
+    shapes::ShapeMsg mesh_msg_tmp;
+    shapes::constructMsgFromShape(mesh, mesh_msg_tmp);
+    mesh_msgs = boost::get<shape_msgs::msg::Mesh>(mesh_msg_tmp);
 
-  geometry_msgs::msg::Pose pose;
-  pose.position.x = 0.45;
-  pose.position.y = 0.15;
-  pose.position.z = 0.0;
-  pose.orientation.w = 1.0;
+    delete mesh;
 
-  wine_glass.meshes.push_back(mesh_msgs);
-  wine_glass.mesh_poses.push_back(pose);
-  wine_glass.operation = wine_glass.ADD;
+    geometry_msgs::msg::Pose pose;
+    pose.position.x = x;
+    pose.position.y = y;
+    pose.position.z = z;
+    pose.orientation.w = 1.0;
 
+    wine_glass.meshes.push_back(mesh_msgs);
+    wine_glass.mesh_poses.push_back(pose);
+    wine_glass.operation = wine_glass.ADD;
+    return wine_glass;
+  };
+
+  auto glass1 = spawn("wine_glass", 0.45, 0.15, 0.0);
+  auto glass2 = spawn("wine_glass_2", 0.45, 0.4, 0.0);
+
+  std::vector<moveit_msgs::msg::CollisionObject> glasses{glass1, glass2};
   moveit::planning_interface::PlanningSceneInterface psi;
-  psi.applyCollisionObject(wine_glass);
-
+  psi.addCollisionObjects(glasses);
   // ----------(TASK)----------------------
   Task t;
   t.setName("wine_glass_manipulation");
@@ -70,14 +74,14 @@ int main(int argc, char *argv[]) {
 
   // ----------(PLANNERS)----------------------
   auto pipeline_planner = std::make_shared<solvers::PipelinePlanner>(node);
-  pipeline_planner->setMaxAccelerationScalingFactor(0.2);
-  pipeline_planner->setMaxVelocityScalingFactor(0.2);
+  pipeline_planner->setMaxAccelerationScalingFactor(0.15);
+  pipeline_planner->setMaxVelocityScalingFactor(0.15);
 
   auto cartesian_planner = std::make_shared<solvers::CartesianPath>();
-  cartesian_planner->setMaxAccelerationScalingFactor(0.2);
-  cartesian_planner->setMaxVelocityScalingFactor(0.2);
-  cartesian_planner->setStepSize(0.002);
-  cartesian_planner->setJumpThreshold(2.0);
+  cartesian_planner->setMaxAccelerationScalingFactor(0.1);
+  cartesian_planner->setMaxVelocityScalingFactor(0.1);
+  cartesian_planner->setStepSize(0.001);
+  cartesian_planner->setJumpThreshold(3.0);
 
   // ----------(CURRENT STATE)----------------------
   Stage *Initial_pointer = nullptr;
@@ -150,8 +154,8 @@ int main(int argc, char *argv[]) {
           Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitZ());
       ik_transformation.linear() = q.matrix();
       ik_transformation.translation().z() = 0.1;
-      ik_transformation.translation().x() = -0.05;
-      ik_transformation.translation().y() = 0.05;
+      ik_transformation.translation().x() = -0.033;
+      ik_transformation.translation().y() = 0.033;
 
       auto ik_wrapper =
           std::make_unique<stages::ComputeIK>("Compute IK", std::move(stage));
@@ -219,7 +223,7 @@ int main(int argc, char *argv[]) {
   q.setRPY(M_PI / 2, M_PI / 4, 0.0);
 
   ocm.orientation = tf2::toMsg(q);
-  ocm.absolute_x_axis_tolerance = M_PI;
+  ocm.absolute_x_axis_tolerance = -M_PI;
   ocm.absolute_y_axis_tolerance = M_PI;
   ocm.absolute_z_axis_tolerance = M_PI;
 
@@ -231,7 +235,6 @@ int main(int argc, char *argv[]) {
     auto stage = std::make_unique<stages::Connect>(
         "Move to Place - Pipeline",
         stages::Connect::GroupPlannerVector{{"panda_arm", pipeline_planner}});
-    stage->setTimeout(5.0);
     stage->setPathConstraints(constraints);
     t.add(std::move(stage));
   }
@@ -250,7 +253,7 @@ int main(int argc, char *argv[]) {
                                                           cartesian_planner);
       geometry_msgs::msg::Vector3Stamped vec;
       vec.header.frame_id = "world";
-      vec.vector.z = -0.3;
+      vec.vector.z = -0.13;
       stage->setDirection(vec);
       stage->properties().configureInitFrom(Stage::PARENT, {"group"});
       place_container->insert(std::move(stage));
@@ -264,10 +267,10 @@ int main(int argc, char *argv[]) {
       stage->setObject("wine_glass");
 
       geometry_msgs::msg::PoseStamped pose;
-      pose.header.frame_id = "world";
-      pose.pose.position.x = 0.45;
-      pose.pose.position.y = 0.4;
-      pose.pose.position.z = 0.1;
+      pose.header.frame_id = "wine_glass_2";
+      pose.pose.position.x = 0;
+      pose.pose.position.y = 0;
+      pose.pose.position.z = 0.22;
       stage->setPose(pose);
       // TODO(DONE) : replace the ik with Eigen
       Eigen::Isometry3d place_transformation;
@@ -277,6 +280,7 @@ int main(int argc, char *argv[]) {
           Eigen::AngleAxisd(M_PI / 4, Eigen::Vector3d::UnitY()) *
           Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitY());
       place_transformation.linear() = q.matrix();
+      place_transformation.translation().z() = 0.1;
 
       auto ik_wrapper =
           std::make_unique<stages::ComputeIK>("ComputeIK", std::move(stage));
@@ -288,6 +292,18 @@ int main(int argc, char *argv[]) {
                                                  {"target_pose"});
       place_container->insert(std::move(ik_wrapper));
 
+      {
+        auto stage = std::make_unique<stages::MoveRelative>("Place Allowance",
+                                                            cartesian_planner);
+        stage->setGroup("panda_arm");
+        stage->properties().configureInitFrom(Stage::PARENT, {"group"});
+        geometry_msgs::msg::Vector3Stamped vec;
+        vec.header.frame_id = "panda_link8";
+        vec.vector.x = -0.01;
+        vec.vector.y = 0.01;
+        stage->setDirection(vec);
+        place_container->insert(std::move(stage));
+      }
       // ----------(OPEN GRIPPER)----------------------
       {
         auto stage =
@@ -301,7 +317,7 @@ int main(int argc, char *argv[]) {
     // ----------(FORBID COLLISON)----------------------
     {
       auto stage =
-          std::make_unique<stages::ModifyPlanningScene>("forbid collison");
+          std::make_unique<stages::ModifyPlanningScene>("Forbid Collison");
       stage->allowCollisions(
           "wine_glass", *t.getRobotModel()->getJointModelGroup("hand"), false);
       place_container->insert(std::move(stage));
@@ -310,32 +326,31 @@ int main(int argc, char *argv[]) {
     // ----------(DETACH OBJECT)----------------------
     {
       auto stage =
-          std::make_unique<stages::ModifyPlanningScene>("detach object");
+          std::make_unique<stages::ModifyPlanningScene>("Detach Object");
       stage->detachObject("wine_glass", "panda_link8");
       place_container->insert(std::move(stage));
     }
 
     // ----------(RETREAT BACK)----------------------
     {
-      auto stage = std::make_unique<stages::MoveRelative>("retreat after place",
-                                                          cartesian_planner);
+      auto stage =
+          std::make_unique<stages::MoveRelative>("Retreat", cartesian_planner);
       stage->setGroup("panda_arm");
-      stage->setMinMaxDistance(0.12, 0.25);
       stage->properties().configureInitFrom(Stage::PARENT, {"group"});
       geometry_msgs::msg::Vector3Stamped vec;
       vec.header.frame_id = "panda_link8";
-      vec.vector.z = -0.5;
+      vec.vector.z = -0.3;
       stage->setDirection(vec);
       place_container->insert(std::move(stage));
     }
-
+    //
     t.add(std::move(place_container));
   } // end of place container
 
   // ----------(MOVE HOME)----------------------
   {
     auto stage =
-        std::make_unique<stages::MoveTo>("move home", pipeline_planner);
+        std::make_unique<stages::MoveTo>("Move Home", pipeline_planner);
     stage->properties().configureInitFrom(Stage::PARENT, {"group"});
     stage->setGoal("ready");
     stage->restrictDirection(stages::MoveTo::FORWARD);
