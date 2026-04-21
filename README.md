@@ -1,4 +1,4 @@
-# 🍷 WineBot — Autonomous Wine Glass Stacking
+# 🍷 WineBot —  Wine Glass Stacking using MTC
 
 **Robotics | Motion Planning | ROS 2 | MoveIt 2 | NVIDIA Isaac Sim**
 
@@ -6,7 +6,7 @@
 
 ## 📌 Overview
 
-WineBot is a robotics project that demonstrates **autonomous pick-and-place with precision stacking** using a Franka Panda robot arm.
+WineBot is a robotics project that demonstrates ** pick-and-place with precision stacking** using a Franka Panda robot arm.
 
 The system plans and executes the complete task of:
 - Grasping a  wine glass  
@@ -19,7 +19,8 @@ All motions are generated using **MoveIt Task Constructor (MTC)**, ensuring coll
 
 ## 🎥 Demo
 
-> Add a short GIF or video of the stacking task here
+![WineBot Demo](https://github.com/logesh1516/Wine-glass-Manipulation/blob/9bd279c06396ce373b53717ac0c3dc1898bf3abe/src/isaacsim_assets/isaac_sim_1_1_1.gif)
+
 
 ---
 
@@ -127,6 +128,4 @@ ros2 launch isaacsim_winebot mtc_execute.launch.py
 ```
 
 ---
-Robotics & Automation Engineer  
 
-Feel free to connect or collaborate on robotics and ROS-based projects.
